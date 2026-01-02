@@ -1,8 +1,9 @@
-# Alice_The_Robo_Arm
-Alice a third helping hand that I made to help you in your daily tasks it is inspired by iron man dummy robot
+# zero-the-robo-arm
+
+Zero a third helping hand that I made to help you in your daily tasks it is inspired by iron man dummy robot
 
 
-Alice robo arm is made from basic architecture which follows:
+Zero robo arm is made from basic architecture which follows:
 
 #For the frame I am going for wood. The wood need to be good solid 5 to 10 mm wood for base car and thin 2 to 3 mm 
 wood for arm itself as we want our arm to be solid and stiff but light at the same time the material I already 
