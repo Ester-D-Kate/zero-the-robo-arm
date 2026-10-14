@@ -1,0 +1,18 @@
+{
+  "name": "zero-static-controller",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.js",
+    "test": "bun test tests",
+    "preview": "bun scripts/preview.js",
+    "test:browser": "bunx --bun playwright test"
+  },
+  "dependencies": {
+    "mqtt": "^5.14.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "prettier": "^3"
+  }
+}

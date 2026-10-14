@@ -1,5 +1,7 @@
 # zero-the-robo-arm
 
+The static MQTT controller, queue, admin master controls, and ESP32-CAM POV setup are documented in [CONTROLLER_SETUP.md](CONTROLLER_SETUP.md). New controller configuration uses `.env` and `HAS_ROBOTIC_ARM`.
+
 Zero a third helping hand that I made to help you in your daily tasks it is inspired by iron man dummy robot
 
 

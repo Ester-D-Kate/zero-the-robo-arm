@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.netlify/
+**/node_modules/
+**/dist/
+**/.pio/
+.cache/
+**/test-results/
+**/playwright-report/
+**/compile_commands.json

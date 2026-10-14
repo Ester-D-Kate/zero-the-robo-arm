@@ -1,0 +1,11 @@
+{
+  "name": "zero-the-robo-arm",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run --cwd Web_controllers/Controller_page_zero build",
+    "test": "bun test Web_controllers/Controller_page_zero/tests",
+    "test:browser": "bun run --cwd Web_controllers/Controller_page_zero test:browser",
+    "preview": "bun run --cwd Web_controllers/Controller_page_zero preview"
+  }
+}

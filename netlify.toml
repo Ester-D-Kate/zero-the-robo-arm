@@ -1,0 +1,7 @@
+[build]
+  base = "."
+  command = "bun install --frozen-lockfile --cwd Web_controllers/Controller_page_zero && bun run build"
+  publish = "Web_controllers/Controller_page_zero/dist"
+
+[build.environment]
+  BUN_VERSION = "1.3.14"

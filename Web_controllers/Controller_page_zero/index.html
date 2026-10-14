@@ -1,1306 +1,337 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Zero Robot Controller - SECURE AUDIO MQTT</title>
-    <style>
-        /* Your existing CSS styles plus new audio MQTT UI */
-        :root {
-            --bg-color: #f0f0f0;
-            --panel-color: #e0e0e0;
-            --button-bg: #fff;
-            --button-text: #000;
-            --joystick-knob: #888;
-            --voice-primary: #ff6b6b;
-            --voice-recording: #ff0000;
-        }
-        
-        body {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            background-color: var(--bg-color);
-            margin: 0;
-            font-family: Arial, sans-serif;
-        }
-        
-        .connection-status {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 8px 15px;
-            border-radius: 20px;
-            color: white;
-            font-weight: bold;
-            font-size: 12px;
-            z-index: 1001;
-        }
-        .status-connected { background: #28a745; }
-        .status-connecting { background: #ffc107; color: black; }
-        .status-disconnected { background: #dc3545; }
-        
-        /* Voice Status Indicator */
-        .voice-status {
-            position: fixed;
-            top: 10px;
-            left: 10px;
-            padding: 8px 15px;
-            border-radius: 20px;
-            color: white;
-            font-weight: bold;
-            font-size: 12px;
-            z-index: 1001;
-            background: #6c757d;
-            display: none;
-            max-width: 300px;
-            word-wrap: break-word;
-        }
-        .voice-recording { background: var(--voice-recording) !important; animation: pulse 1s infinite; }
-        .voice-processing { background: #ffc107; color: black; }
-        .voice-success { background: #28a745; }
-        .voice-error { background: #dc3545; }
-        
-        /* NEW: Audio Size Indicator */
-        .audio-size-indicator {
-            position: fixed;
-            bottom: 90px;
-            right: 2vw;
-            width: 200px;
-            background: rgba(0,0,0,0.8);
-            color: white;
-            padding: 8px 12px;
-            border-radius: 10px;
-            font-size: 12px;
-            display: none;
-            z-index: 999;
-        }
-        
-        .size-bar-container {
-            width: 100%;
-            height: 4px;
-            background: #333;
-            border-radius: 2px;
-            margin: 5px 0;
-            overflow: hidden;
-        }
-        
-        .size-bar {
-            height: 100%;
-            background: linear-gradient(to right, #4CAF50, #FF9800, #f44336);
-            width: 0%;
-            transition: width 0.3s;
-        }
-        
-        .voice-button.size-warning {
-            background: #FF9800 !important;
-            animation: warning-pulse 0.5s infinite;
-        }
-        
-        .voice-button.mqtt-mode {
-            border: 3px solid #00ff00;
-            box-shadow: 0 0 15px rgba(0,255,0,0.5);
-        }
-        
-        /* NEW: MQTT Security Status */
-        .security-status {
-            position: fixed;
-            top: 50px;
-            right: 10px;
-            padding: 6px 12px;
-            border-radius: 15px;
-            color: white;
-            font-weight: bold;
-            font-size: 10px;
-            z-index: 1001;
-            background: #17a2b8;
-            display: block;
-        }
-        .security-enabled { background: #28a745; }
-        .security-disabled { background: #dc3545; }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        
-        @keyframes warning-pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-        }
-        
-        .extra_parent {
-            display: flex;
-            position: absolute;
-            top: 15vh;
-            justify-content: center;
-            align-items: center;
-            flex-direction: row;
-            width: 100vw;
-        }
-        
-        .extra_parent1 {
-            display: flex;
-            position: absolute;
-            flex-direction: column;
-            justify-content: center;
-            left: 8.5vw;
-            align-items: center;
-            flex-direction: row;
-        }
-        
-        .extra_parent2 {
-            display: flex;
-            position: absolute;
-            flex-direction: column;
-            justify-content: center;
-            right: 8.5vw;
-            align-items: center;
-            flex-direction: row;
-        }
-        
-        .speed-control {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 0 15px;
-            background: var(--panel-color);
-            padding: 10px 15px;
-            border-radius: 10px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-        }
-        
-        .slider {
-            -webkit-appearance: none;
-            width: 100px;
-            height: 15px;
-            border-radius: 8px;
-            background: #d3d3d3;
-            outline: none;
-            margin: 0 10px;
-        }
-        
-        .slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 25px;
-            height: 25px;
-            border-radius: 50%;
-            background: red;
-            cursor: pointer;
-            border: 2px solid white;
-        }
-        
-        .slider::-moz-range-thumb {
-            width: 25px;
-            height: 25px;
-            border-radius: 50%;
-            background: red;
-            cursor: pointer;
-            border: 2px solid white;
-        }
-        
-        #speedValue {
-            min-width: 40px;
-            text-align: center;
-            font-weight: bold;
-        }
-        
-        .container2 {
-            position: absolute;
-            right: 2vw;
-            top: 30%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            margin: 10px;
-        }
-        
-        button {
-            width: 10vw;
-            height: 20vh;
-            font-size: 2em;
-            margin: 5px;
-            border-radius: 2vw;
-            background: var(--button-bg);
-            color: var(--button-text);
-            box-shadow: 0 2px 8px #aaa;
-            border: none;
-            cursor: pointer;
-            user-select: none;
-        }
-        
-        button:active,
-        button.pressed {
-            background-color: #cccccc;
-            transform: scale(0.96);
-            box-shadow: 0 2px #666;
-        }
-        
-        .Stop {
-            background-color: red !important;
-            color: #fff;
-        }
-        
-        /* Voice Control Button */
-        .voice-button {
-            position: fixed;
-            right: 2vw;
-            bottom: 2vh;
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            background: var(--voice-primary);
-            color: #fff;
-            border: none;
-            font-size: 2em;
-            box-shadow: 0 4px 12px rgba(255,107,107,0.3);
-            cursor: pointer;
-            z-index: 1000;
-            transition: all 0.2s;
-            touch-action: none;
-        }
-        
-        .voice-button:hover {
-            background: #ff5252;
-            transform: scale(1.05);
-        }
-        
-        .voice-button.recording {
-            background: var(--voice-recording);
-            animation: pulse 1s infinite;
-            transform: scale(1.1);
-        }
-        
-        .voice-button.processing {
-            background: #ffc107;
-            color: black;
-        }
-        
-        .joystick-container {
-            position: absolute;
-            left: 10vw;
-            top: 65%;
-            transform: translateY(-50%);
-            width: 20vw;
-            height: 40vh;
-            min-width: 120px;
-            min-height: 120px;
-            max-width: 350px;
-            max-height: 350px;
-            background: #000;
-            border-radius: 2vw;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            box-shadow: 0 2px 8px #aaa;
-            touch-action: none;
-        }
-        
-        .joystick-knob {
-            width: 7vw;
-            height: 14vh;
-            min-width: 60px;
-            min-height: 60px;
-            max-width: 140px;
-            max-height: 140px;
-            background: red;
-            border: 4px solid #ffffff;
-            border-radius: 50%;
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            transition: background 0.1s, border-color 0.1s;
-            touch-action: none;
-            box-shadow: 0 10px 15px #a19898;
-        }
-        
-        .theme-toggle-btn {
-            position: fixed;
-            left: 2vw;
-            bottom: 2vh;
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            background: #222;
-            color: #fff;
-            border: none;
-            font-size: 1.5em;
-            box-shadow: 0 2px 8px #aaa;
-            cursor: pointer;
-            z-index: 1000;
-            opacity: 0.7;
-            transition: background 0.2s, opacity 0.2s;
-        }
-        
-        .theme-toggle-btn:hover {
-            background: #444;
-            opacity: 1;
-        }
-        
-        /* Dark mode variables */
-        body.dark {
-            --bg-color: #181818;
-            --panel-color: #232323;
-            --button-bg: #222;
-            --button-text: #fff;
-        }
-        
-        body.dark .joystick-container {
-            background: #fff;
-            box-shadow: 0 2px 8px #111;
-        }
-        
-        body.dark .joystick-knob {
-            background: red;
-            border: 4px solid #000;
-            box-shadow: 0 2px 8px #111;
-        }
-        
-        body.dark button {
-            background: #222;
-            color: #fff;
-            box-shadow: 0 2px 8px #111;
-        }
-        
-        body.dark .Stop {
-            background-color: red !important;
-            color: #fff;
-        }
-        
-        body.dark button:active,
-        body.dark button.pressed {
-            background-color: #cccccc !important;
-            color: #000;
-            transform: scale(0.96);
-            box-shadow: 0 2px #666;
-        }
-        
-        body.dark .speed-control {
-            background: var(--panel-color);
-            color: white;
-        }
-        
-        body.dark .slider {
-            background: #555;
-        }
-        
-        body.dark .voice-button {
-            box-shadow: 0 4px 12px rgba(255,107,107,0.5);
-        }
-        
-        @media (orientation: portrait) {
-            body {
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                background-color: var(--bg-color);
-                position: relative;
-                overflow: hidden;
-            }
-            .extra_parent {
-                display: flex;
-                position: absolute;
-                top: 5vh;
-                justify-content: center;
-                align-items: center;
-                flex-direction: row;
-                width: 100vw;
-            }
-            .extra_parent1 {
-                display: flex;
-                position: absolute;
-                flex-direction: row;
-                justify-content: center;
-                left: 2vw;
-                align-items: center;
-            }
-            .extra_parent2 {
-                display: flex;
-                position: absolute;
-                flex-direction: row;
-                justify-content: center;
-                right: 2vw;
-                align-items: center;
-            }
-            .speed-control {
-                position: absolute;
-                top: 12vh;
-                left: 50%;
-                transform: translateX(-50%);
-                width: fit-content;
-                padding: 8px 12px;
-                margin: 0;
-            }
-            .RL {
-                display: flex;
-                flex-direction: row;
-                justify-content: center;
-                align-items: center;
-            }
-            .container2 {
-                position: absolute;
-                left: 50%;
-                top: 23%;
-                transform: translateX(-50%);
-                display: flex;
-                flex-direction: column;
-                justify-content: center;
-                align-items: center;
-                margin: 10px;
-                height: fit-content;
-                width: fit-content;
-            }
-            button {
-                width: 16vw;
-                height: 16vw;
-                font-size: 1.2em;
-                border-radius: 1.2em;
-                box-sizing: border-box;
-                white-space: nowrap;
-                min-width: 60px;
-                min-height: 60px;
-            }
-            .joystick-container {
-                position: absolute;
-                left: 50%;
-                top: 75vh;
-                transform: translate(-50%, -50%);
-                width: 28vh;
-                aspect-ratio: 1/1;
-                height: auto;
-                min-width: 120px;
-                min-height: 120px;
-                max-width: 280px;
-                max-height: 280px;
-            }
-            .joystick-knob {
-                width: 12vh;
-                aspect-ratio: 1/1;
-                height: auto;
-                min-width: 50px;
-                min-height: 50px;
-                max-width: 120px;
-                max-height: 120px;
-            }
-            .parent{
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                flex-direction: column;
-                height: 100vh;
-                width: 100vw;
-            }
-            .voice-button {
-                width: 70px;
-                height: 70px;
-                font-size: 1.8em;
-                right: 3vw;
-                bottom: 3vh;
-            }
-            .voice-status {
-                max-width: 250px;
-                font-size: 11px;
-            }
-            .audio-size-indicator {
-                width: 180px;
-                bottom: 80px;
-                right: 3vw;
-            }
-        }
-    </style>
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-</head>
-<body>
-    <div id="connectionStatus" class="connection-status status-connecting">Connecting...</div>
-    <div id="securityStatus" class="security-status security-enabled">🔒 MQTT Secure</div>
-    <div id="voiceStatus" class="voice-status">Voice Ready</div>
-    <div id="audioSizeIndicator" class="audio-size-indicator">
-        <div>Audio Size: <span id="audioSizeText">0KB</span> / 500KB</div>
-        <div class="size-bar-container">
-            <div id="audioSizeBar" class="size-bar"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <title>Zero Robot Controller</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script src="./config.js"></script>
+    <script type="module" src="./controller.js"></script>
+  </head>
+  <body data-admin="false">
+    <img
+      id="cameraFeed"
+      class="camera-feed"
+      alt="Live view from the robot camera"
+      hidden
+      referrerpolicy="no-referrer"
+    />
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">Z</span>
+          <div>
+            <strong>ZERO</strong
+            ><span id="controllerMode">Robot controller</span>
+          </div>
         </div>
-        <div id="recordingTime">Recording: 0.0s</div>
+        <div class="connection">
+          <span id="connectionDot" class="connection-dot"></span
+          ><span id="connectionStatus" role="status">Connecting…</span>
+        </div>
+        <button
+          id="themeToggle"
+          class="quiet-button"
+          type="button"
+          aria-label="Toggle light theme"
+        >
+          Light theme
+        </button>
+      </header>
+      <div id="notice" class="notice" role="alert" hidden></div>
+      <div class="session-bar surface">
+        <div class="access-copy">
+          <span class="eyebrow">CONTROL ACCESS</span
+          ><strong id="accessStatus" role="status" aria-live="polite"
+            >Connecting to MQTT…</strong
+          >
+        </div>
+        <form id="joinForm" class="inline-form">
+          <label class="field"
+            >Username<input
+              id="username"
+              name="username"
+              autocomplete="nickname"
+              minlength="2"
+              maxlength="24"
+              placeholder="Choose a unique name"
+              required /></label
+          ><button
+            id="joinButton"
+            class="primary-button"
+            type="submit"
+            disabled
+          >
+            Request access
+          </button>
+        </form>
+        <button id="leaveButton" class="quiet-button" type="button" hidden>
+          Leave queue
+        </button>
+        <form id="adminLoginForm" class="inline-form" hidden>
+          <label class="field"
+            >Admin password<input
+              id="adminPassword"
+              type="password"
+              autocomplete="current-password"
+              required /></label
+          ><button
+            id="adminLoginButton"
+            class="primary-button"
+            type="submit"
+            disabled
+          >
+            Sign in
+          </button>
+        </form>
+        <button id="adminLogout" class="quiet-button" type="button" hidden>
+          Sign out
+        </button>
+      </div>
+      <section
+        id="adminPanel"
+        class="admin-panel surface"
+        aria-label="Admin controls"
+        hidden
+      >
+        <div>
+          <span class="eyebrow">ADMIN</span>
+          <p>Keep this tab open to manage the queue and user turns.</p>
+        </div>
+        <label class="field"
+          >Queue mode<select id="queueMode">
+            <option value="automatic">Automatic FIFO</option>
+            <option value="manual">Manual grants</option>
+          </select></label
+        >
+        <button id="masterButton" class="primary-button" type="button" disabled>
+          Take master control
+        </button>
+        <button id="revokeButton" class="quiet-button" type="button" disabled>
+          Revoke current user
+        </button>
+      </section>
+      <div class="support-bar">
+        <details id="queueDetails" class="queue-details surface">
+          <summary>Queue <span id="queueCount">0</span></summary>
+          <ol id="queueList">
+            <li>No one is waiting.</li>
+          </ol>
+        </details>
+        <details id="cameraSettings" class="camera-settings surface">
+          <summary>
+            Camera <span id="cameraStatus" role="status">Optional camera</span>
+          </summary>
+          <form id="cameraForm" class="camera-form">
+            <label class="field"
+              >Camera stream URL<input
+                id="cameraUrl"
+                type="url"
+                placeholder="http://192.168.1.42:81/stream"
+                autocomplete="url" /></label
+            ><button class="quiet-button" type="submit">Connect camera</button>
+            <p>
+              Use the camera IP URL or port 81 /stream address. Request access
+              first; the camera supports one viewer.
+            </p>
+          </form>
+        </details>
+        <button
+          id="cameraDisconnect"
+          class="quiet-button surface"
+          type="button"
+          hidden
+        >
+          Disconnect camera
+        </button>
+      </div>
+      <main class="control-board" aria-label="Robot control board">
+        <section class="drive-panel surface" aria-labelledby="driveHeading">
+          <div class="section-heading">
+            <h1 id="driveHeading">Drive</h1>
+            <span>CAR</span>
+          </div>
+          <div
+            id="joystick"
+            class="joystick"
+            tabindex="0"
+            role="application"
+            aria-label="Drive joystick. Use arrow keys or W A S D to drive; Space to stop."
+            aria-disabled="true"
+          >
+            <span class="joystick-axis axis-x"></span
+            ><span class="joystick-axis axis-y"></span
+            ><span class="joystick-label north" aria-hidden="true">F</span
+            ><span class="joystick-label south" aria-hidden="true">B</span
+            ><span class="joystick-label west" aria-hidden="true">L</span
+            ><span class="joystick-label east" aria-hidden="true">R</span
+            ><span id="joystickKnob" class="joystick-knob"></span>
+          </div>
+          <div class="direction-pad">
+            <button
+              type="button"
+              data-target="car"
+              data-cmd="F"
+              aria-label="Forward"
+              disabled
+            >
+              ↑</button
+            ><button
+              type="button"
+              data-target="car"
+              data-cmd="L"
+              aria-label="Turn left"
+              disabled
+            >
+              ←</button
+            ><button
+              type="button"
+              data-target="car"
+              data-cmd="B"
+              aria-label="Backward"
+              disabled
+            >
+              ↓</button
+            ><button
+              type="button"
+              data-target="car"
+              data-cmd="R"
+              aria-label="Turn right"
+              disabled
+            >
+              →
+            </button>
+          </div>
+          <p class="hint">Hold a direction or drag the joystick.</p>
+        </section>
+        <section class="primary-panel surface" aria-label="Primary controls">
+          <div class="section-heading">
+            <h2>Control</h2>
+            <span id="activeName">NO DRIVER</span>
+          </div>
+          <label class="speed-label" for="speedSlider"
+            >Drive speed <output id="speedValue">50%</output></label
+          ><input
+            id="speedSlider"
+            type="range"
+            min="0"
+            max="100"
+            value="50"
+            disabled
+          />
+          <button id="stopButton" class="stop-button" type="button" disabled>
+            <span aria-hidden="true">■</span> STOP
+          </button>
+          <button id="voiceButton" class="voice-button" type="button" disabled>
+            <span aria-hidden="true">●</span> Hold to speak
+          </button>
+          <p id="voiceStatus" class="hint" role="status" aria-live="polite">
+            Hold to record; release to send to the voice server.
+          </p>
+          <p class="keyboard-hint">Arrow keys / WASD · Space to stop</p>
+        </section>
+        <section
+          id="armControls"
+          class="arm-panel surface"
+          aria-labelledby="armHeading"
+          hidden
+        >
+          <div class="section-heading">
+            <h2 id="armHeading">Robotic arm</h2>
+            <span>ARM</span>
+          </div>
+          <span class="control-label">Full arm</span>
+          <div class="button-pair">
+            <button
+              type="button"
+              data-target="arm"
+              data-cmd="U"
+              aria-label="Raise arm"
+              disabled
+            >
+              Raise ↑</button
+            ><button
+              type="button"
+              data-target="arm"
+              data-cmd="D"
+              aria-label="Lower arm"
+              disabled
+            >
+              Lower ↓
+            </button>
+          </div>
+          <span class="control-label">Claw</span>
+          <div class="button-pair">
+            <button
+              type="button"
+              data-target="arm"
+              data-cmd="C"
+              aria-label="Close claw"
+              disabled
+            >
+              Close</button
+            ><button
+              type="button"
+              data-target="arm"
+              data-cmd="O"
+              aria-label="Open claw"
+              disabled
+            >
+              Open
+            </button>
+          </div>
+          <span class="control-label">Wrist rotation</span>
+          <div class="button-pair">
+            <button
+              type="button"
+              data-target="arm"
+              data-cmd="1"
+              aria-label="Wrist left"
+              disabled
+            >
+              Left ←</button
+            ><button
+              type="button"
+              data-target="arm"
+              data-cmd="4"
+              aria-label="Wrist right"
+              disabled
+            >
+              Right →
+            </button>
+          </div>
+          <span class="control-label">Wrist angle</span>
+          <div class="button-pair">
+            <button
+              type="button"
+              data-target="arm"
+              data-cmd="2"
+              aria-label="Wrist up"
+              disabled
+            >
+              Up ↑</button
+            ><button
+              type="button"
+              data-target="arm"
+              data-cmd="3"
+              aria-label="Wrist down"
+              disabled
+            >
+              Down ↓
+            </button>
+          </div>
+          <p class="hint">Hold to move. Release to stop.</p>
+        </section>
+      </main>
+      <footer class="footer">
+        <span>One driver at a time.</span
+        ><a id="adminLink" href="./admin/">Admin</a
+        ><a id="controllerLink" href="../" hidden>Controller</a>
+      </footer>
     </div>
-    
-    <div class="extra_parent">
-        <div class="extra_parent1">
-            <button class="extra1">L</button>
-            <button class="extra2">UP</button>
-        </div>
-        <div class="speed-control">
-            <label for="speedSlider">Speed:</label>
-            <input type="range" id="speedSlider" min="0" max="100" value="50" class="slider">
-            <span id="speedValue">50%</span>
-        </div>
-        <div class="extra_parent2">
-            <button class="extra3">DN</button>
-            <button class="extra4">R</button>
-        </div>
-    </div>
-    <button class="theme-toggle-btn" id="themeToggle" title="Toggle dark mode">D</button>
-    <button class="voice-button mqtt-mode" id="voiceButton" title="Hold to record voice command via MQTT">🎤</button>
-    
-    <div class="parent">
-        <div class="joystick-container" id="joystick">
-            <div class="joystick-knob" id="joystickKnob"></div>
-        </div>
-        <div class="container2">
-            <button id="Up">UP</button>
-            <div class="RL">
-               <button id="Close">C</button>
-               <button id="Stop1" class="Stop">S</button>
-               <button id="Open">O</button>
-            </div>
-            <button id="Down">DN</button>
-        </div>
-    </div>
-
-<script>
-    // **SECURITY CONFIGURATION**
-    const SECURITY_TOKEN = "ALICE_ZERO_2024_SECURE"; // Change this to your secret
-    const DEVICE_ID = `WebControl_${Math.random().toString(16).substr(2, 8)}`;
-    
-    // **AUDIO MQTT CONFIGURATION**
-    const MAX_AUDIO_SIZE_KB = 500; // 500KB limit for broker.emqx.io
-    const MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_KB * 1024;
-    const MAX_RECORDING_DURATION = 15; // Max 15 seconds
-    
-    // **MQTT TOPICS - Updated for Audio**
-    const MQTT_BROKER = 'wss://broker.emqx.io:8084/mqtt';
-    const CAR_TOPIC = 'alice/zero/car/command';
-    const ARM_TOPIC = 'alice/zero/arm/command';
-    const ARM_POSITION_TOPIC = 'alice/zero/arm/position';
-    const STATUS_TOPIC = 'alice/zero/robot/status';
-    const AUDIO_TOPIC = 'alice/zero/voice/audio'; // New audio topic
-    const RESPONSE_TOPIC = `alice/zero/voice/response/${DEVICE_ID}`; // Response topic
-    
-    // **VOICE CONTROL VARIABLES**
-    let mediaRecorder = null;
-    let audioChunks = [];
-    let isRecording = false;
-    let voiceCommandActive = false;
-    let recordingStartTime = 0;
-    let sizeMonitorInterval = null;
-    
-    // **EXISTING VARIABLES**
-    let mqttClient = null;
-    let isConnected = false;
-    let pressedButtons = new Set();
-    let commandCount = 0;
-    let sendIntervals = new Map();
-    const SEND_INTERVAL_MS = 100;
-    
-    // **UI ELEMENTS**
-    const statusElement = document.getElementById('connectionStatus');
-    const securityStatusElement = document.getElementById('securityStatus');
-    const voiceStatusElement = document.getElementById('voiceStatus');
-    const voiceButton = document.getElementById('voiceButton');
-    const speedSlider = document.getElementById('speedSlider');
-    const speedValue = document.getElementById('speedValue');
-    const audioSizeIndicator = document.getElementById('audioSizeIndicator');
-    const audioSizeText = document.getElementById('audioSizeText');
-    const audioSizeBar = document.getElementById('audioSizeBar');
-    const recordingTimeElement = document.getElementById('recordingTime');
-    
-    // **DEBUG LOGGING**
-    function log(message, type = 'info') {
-        const timestamp = new Date().toLocaleTimeString();
-        const emoji = {
-            'success': '✅',
-            'error': '❌', 
-            'command': '📤',
-            'info': '📝',
-            'voice': '🎤',
-            'security': '🔒',
-            'audio': '🔊'
-        };
-        console.log(`${emoji[type] || '📝'} [${timestamp}] ${message}`);
-    }
-    
-    // **SECURE AUDIO MQTT CLASS**
-    class SecureAudioMQTT {
-        constructor(mqttClient, maxSizeKB = 500) {
-            this.client = mqttClient;
-            this.maxSizeKB = maxSizeKB;
-            this.maxSizeBytes = maxSizeKB * 1024;
-            this.isRecording = false;
-            this.securityToken = SECURITY_TOKEN;
-            this.deviceId = DEVICE_ID;
-        }
-        
-        async startRecording() {
-            if (this.isRecording || !this.client || !isConnected) {
-                log('Cannot start recording - already recording or MQTT not connected', 'error');
-                return false;
-            }
-            
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        sampleRate: 16000,
-                        channelCount: 1,
-                        echoCancellation: true,
-                        noiseSuppression: true
-                    }
-                });
-                
-                mediaRecorder = new MediaRecorder(stream, {
-                    mimeType: 'audio/webm;codecs=opus',
-                    audioBitsPerSecond: 12000
-                });
-                
-                audioChunks = [];
-                recordingStartTime = Date.now();
-                this.isRecording = true;
-                voiceCommandActive = true;
-                
-                // UI updates
-                voiceButton.classList.add('recording');
-                audioSizeIndicator.style.display = 'block';
-                updateVoiceStatus('🎤 Recording via MQTT...', 'voice-recording');
-                
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
-                        this.updateSizeIndicator();
-                    }
-                };
-                
-                mediaRecorder.onstop = () => {
-                    this.processAndSendAudio();
-                };
-                
-                mediaRecorder.start(500);
-                this.startSizeMonitoring();
-                
-                setTimeout(() => {
-                    if (this.isRecording) {
-                        log(`Auto-stop at ${MAX_RECORDING_DURATION}s limit`, 'audio');
-                        this.stopRecording();
-                    }
-                }, MAX_RECORDING_DURATION * 1000);
-                
-                log('Secure audio recording started', 'audio');
-                return true;
-                
-            } catch (error) {
-                log(`Recording failed: ${error.message}`, 'error');
-                updateVoiceStatus('❌ Microphone Error', 'voice-error');
-                this.cleanup();
-                return false;
-            }
-        }
-        
-        stopRecording() {
-            if (!this.isRecording || !mediaRecorder) return;
-            
-            this.isRecording = false;
-            mediaRecorder.stop();
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            
-            voiceButton.classList.remove('recording');
-            voiceButton.classList.add('processing');
-            updateVoiceStatus('⏳ Sending via MQTT...', 'voice-processing');
-            
-            this.stopSizeMonitoring();
-            log('Recording stopped, processing...', 'audio');
-        }
-        
-        startSizeMonitoring() {
-            sizeMonitorInterval = setInterval(() => {
-                this.updateSizeIndicator();
-                
-                const currentSize = this.getCurrentAudioSize();
-                if (currentSize > this.maxSizeBytes * 0.95) {
-                    log('Size limit approaching, auto-stopping', 'audio');
-                    this.stopRecording();
-                }
-            }, 200);
-        }
-        
-        stopSizeMonitoring() {
-            if (sizeMonitorInterval) {
-                clearInterval(sizeMonitorInterval);
-                sizeMonitorInterval = null;
-            }
-        }
-        
-        getCurrentAudioSize() {
-            return audioChunks.reduce((total, chunk) => total + chunk.size, 0);
-        }
-        
-        updateSizeIndicator() {
-            const currentSize = this.getCurrentAudioSize();
-            const estimatedFinalSize = currentSize * 1.4;
-            const sizeKB = (estimatedFinalSize / 1024).toFixed(1);
-            const percentage = (estimatedFinalSize / this.maxSizeBytes) * 100;
-            const duration = ((Date.now() - recordingStartTime) / 1000).toFixed(1);
-            
-            audioSizeText.textContent = `${sizeKB}KB`;
-            audioSizeBar.style.width = `${Math.min(percentage, 100)}%`;
-            recordingTimeElement.textContent = `Recording: ${duration}s`;
-            
-            if (percentage > 80) {
-                voiceButton.classList.add('size-warning');
-            } else {
-                voiceButton.classList.remove('size-warning');
-            }
-        }
-        
-        async processAndSendAudio() {
-            try {
-                if (audioChunks.length === 0) {
-                    throw new Error('No audio data recorded');
-                }
-                
-                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                const duration = (Date.now() - recordingStartTime) / 1000;
-                
-                log(`Audio recorded: ${duration.toFixed(1)}s, ${(audioBlob.size / 1024).toFixed(1)}KB`, 'audio');
-                
-                if (audioBlob.size > this.maxSizeBytes) {
-                    throw new Error(`Audio too large: ${(audioBlob.size / 1024).toFixed(1)}KB (max: ${this.maxSizeKB}KB)`);
-                }
-                
-                // Convert to base64
-                const arrayBuffer = await audioBlob.arrayBuffer();
-                const base64Audio = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-                
-                // Create secure payload
-                const securePayload = {
-                    security_token: this.securityToken,
-                    device_id: this.deviceId,
-                    audio_data: base64Audio,
-                    audio_format: 'audio/webm',
-                    duration: duration,
-                    sample_rate: 16000,
-                    channels: 1,
-                    timestamp: Date.now(),
-                    size_bytes: audioBlob.size,
-                    message_id: `audio_${Date.now()}_${Math.random().toString(16).substr(2, 8)}`
-                };
-                
-                // Send via MQTT
-                const success = this.sendSecureAudioMQTT(securePayload);
-                
-                if (success) {
-                    updateVoiceStatus('✅ Audio sent via MQTT', 'voice-success');
-                    log(`Secure audio sent via MQTT: ${(audioBlob.size / 1024).toFixed(1)}KB`, 'security');
-                } else {
-                    throw new Error('MQTT send failed');
-                }
-                
-            } catch (error) {
-                log(`Audio processing failed: ${error.message}`, 'error');
-                updateVoiceStatus(`❌ ${error.message}`, 'voice-error');
-            }
-            
-            this.cleanup();
-        }
-        
-        sendSecureAudioMQTT(payload) {
-            if (!this.client || !isConnected) {
-                log('MQTT not connected', 'error');
-                return false;
-            }
-            
-            try {
-                const result = this.client.publish(AUDIO_TOPIC, JSON.stringify(payload), { qos: 1 });
-                log(`MQTT Audio Publish - Topic: ${AUDIO_TOPIC}, Size: ${JSON.stringify(payload).length} bytes`, 'audio');
-                return result;
-            } catch (error) {
-                log(`MQTT publish failed: ${error.message}`, 'error');
-                return false;
-            }
-        }
-        
-        cleanup() {
-            this.isRecording = false;
-            voiceCommandActive = false;
-            voiceButton.classList.remove('recording', 'processing', 'size-warning');
-            audioSizeIndicator.style.display = 'none';
-            this.stopSizeMonitoring();
-            audioChunks = [];
-            
-            if (mediaRecorder && mediaRecorder.stream) {
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            }
-        }
-    }
-    
-    // **INITIALIZE SECURE AUDIO MQTT**
-    let secureAudioMQTT = null;
-    
-    // **VOICE STATUS FUNCTION**
-    function updateVoiceStatus(message, className = '') {
-        voiceStatusElement.textContent = message;
-        voiceStatusElement.className = `voice-status ${className}`;
-        voiceStatusElement.style.display = 'block';
-        
-        if (className === 'voice-success' || className === 'voice-error') {
-            setTimeout(() => {
-                voiceStatusElement.style.display = 'none';
-            }, 5000);
-        }
-    }
-    
-    // **ALL YOUR EXISTING ROBOT CONTROL FUNCTIONS**
-    function sendArmCommand(command) {
-        if (!isConnected || !mqttClient) {
-            log('MQTT not connected - ARM command ignored', 'error');
-            return false;
-        }
-        
-        const payload = {
-            cmd: command,
-            timestamp: Date.now(),
-            id: ++commandCount
-        };
-        
-        try {
-            mqttClient.publish(ARM_TOPIC, JSON.stringify(payload));
-            log(`ARM: ${command} (ID: ${commandCount})`, 'command');
-            return true;
-        } catch (error) {
-            log(`ARM publish failed: ${error.message}`, 'error');
-            return false;
-        }
-    }
-    
-    function sendArmPositionCommand(positions) {
-        if (!isConnected || !mqttClient) {
-            log('MQTT not connected - ARM POSITION command ignored', 'error');
-            return false;
-        }
-        
-        const payload = {
-            ...positions,
-            timestamp: Date.now(),
-            id: ++commandCount
-        };
-        
-        try {
-            mqttClient.publish(ARM_POSITION_TOPIC, JSON.stringify(payload));
-            log(`ARM POSITION: ${JSON.stringify(positions)} (ID: ${commandCount})`, 'command');
-            return true;
-        } catch (error) {
-            log(`ARM POSITION publish failed: ${error.message}`, 'error');
-            return false;
-        }
-    }
-    
-    function sendCarCommand(command, speed = null) {
-        if (!isConnected || !mqttClient) {
-            log('MQTT not connected - CAR command ignored', 'error');
-            return false;
-        }
-        
-        const payload = {
-            cmd: command,
-            timestamp: Date.now(),
-            id: ++commandCount
-        };
-        
-        if (speed !== null) {
-            payload.speed = speed;
-        }
-        
-        try {
-            mqttClient.publish(CAR_TOPIC, JSON.stringify(payload));
-            log(`CAR: ${command}${speed ? ` (${speed}%)` : ''} (ID: ${commandCount})`, 'command');
-            return true;
-        } catch (error) {
-            log(`CAR publish failed: ${error.message}`, 'error');
-            return false;
-        }
-    }
-    
-    // **CONTINUOUS SENDING FUNCTIONS**
-    function startContinuousSending(buttonId, cmd, isArmButton) {
-        stopContinuousSending(buttonId);
-        
-        if (isArmButton) {
-            sendArmCommand(cmd);
-        } else {
-            sendCarCommand(cmd, parseInt(speedSlider.value));
-        }
-        
-        const intervalId = setInterval(() => {
-            if (isArmButton) {
-                sendArmCommand(cmd);
-            } else {
-                sendCarCommand(cmd, parseInt(speedSlider.value));
-            }
-        }, SEND_INTERVAL_MS);
-        
-        sendIntervals.set(buttonId, intervalId);
-        log(`CONTINUOUS START: ${cmd} (every ${SEND_INTERVAL_MS}ms)`, 'success');
-    }
-    
-    function stopContinuousSending(buttonId) {
-        const intervalId = sendIntervals.get(buttonId);
-        if (intervalId) {
-            clearInterval(intervalId);
-            sendIntervals.delete(buttonId);
-            log(`CONTINUOUS STOP: ${buttonId}`, 'info');
-        }
-    }
-    
-    function stopAllContinuousSending() {
-        sendIntervals.forEach((intervalId, buttonId) => {
-            clearInterval(intervalId);
-            log(`STOP INTERVAL: ${buttonId}`, 'info');
-        });
-        sendIntervals.clear();
-        
-        pressedButtons.clear();
-        document.querySelectorAll('button.pressed').forEach(b => {
-            b.classList.remove('pressed');
-        });
-        
-        sendArmCommand("S");
-        sendCarCommand("S", parseInt(speedSlider.value));
-        log('All continuous sending stopped', 'success');
-    }
-    
-    // **MQTT CONNECTION WITH AUDIO SUPPORT**
-    function connectMQTT() {
-        log('Connecting to EMQX broker with audio support...', 'info');
-        statusElement.textContent = 'Connecting to EMQX...';
-        statusElement.className = 'connection-status status-connecting';
-        
-        try {
-            mqttClient = mqtt.connect(MQTT_BROKER, {
-                keepalive: 60,
-                reconnectPeriod: 1000,
-                connectTimeout: 10000,
-                clean: true,
-                clientId: `ZeroRobotAudio_${Math.random().toString(16).substr(2, 8)}`
-            });
-            
-            mqttClient.on('connect', () => {
-                log('Connected to EMQX broker with audio support!', 'success');
-                isConnected = true;
-                statusElement.textContent = 'Connected: EMQX + Audio';
-                statusElement.className = 'connection-status status-connected';
-                
-                // Initialize secure audio MQTT
-                secureAudioMQTT = new SecureAudioMQTT(mqttClient, MAX_AUDIO_SIZE_KB);
-                
-                // Subscribe to topics
-                mqttClient.subscribe(STATUS_TOPIC, (err) => {
-                    if (!err) {
-                        log('Subscribed to robot status', 'success');
-                    }
-                });
-                
-                // Subscribe to response topic for this device
-                mqttClient.subscribe(RESPONSE_TOPIC, (err) => {
-                    if (!err) {
-                        log(`Subscribed to response topic: ${RESPONSE_TOPIC}`, 'success');
-                    }
-                });
-            });
-            
-            mqttClient.on('error', (err) => {
-                log(`EMQX connection failed: ${err.message}`, 'error');
-                isConnected = false;
-                statusElement.textContent = 'EMQX Connection Failed';
-                statusElement.className = 'connection-status status-disconnected';
-            });
-            
-            mqttClient.on('offline', () => {
-                log('EMQX offline', 'error');
-                isConnected = false;
-                statusElement.textContent = 'EMQX Offline';
-                statusElement.className = 'connection-status status-disconnected';
-            });
-            
-            mqttClient.on('reconnect', () => {
-                log('Reconnecting to EMQX...', 'info');
-                statusElement.textContent = 'Reconnecting to EMQX...';
-                statusElement.className = 'connection-status status-connecting';
-            });
-            
-            mqttClient.on('close', () => {
-                log('EMQX connection closed', 'error');
-                isConnected = false;
-                statusElement.textContent = 'EMQX Disconnected';
-                statusElement.className = 'connection-status status-disconnected';
-                stopAllContinuousSending();
-            });
-            
-            // Handle incoming messages
-            mqttClient.on('message', (topic, message) => {
-                if (topic === STATUS_TOPIC) {
-                    try {
-                        const status = JSON.parse(message.toString());
-                        log(`Robot: Online, Heap: ${status.system?.free_heap}b`, 'info');
-                        
-                        if (commandCount % 10 === 0 && status.arm?.positions) {
-                            const pos = status.arm.positions;
-                            log(`Servos A1:${pos.A1}° A2:${pos.A2}° A3:${pos.A3}° A4:${pos.A4}°`, 'info');
-                        }
-                    } catch (e) {
-                        log(`Status parse error: ${e.message}`, 'error');
-                    }
-                } else if (topic === RESPONSE_TOPIC) {
-                    try {
-                        const response = JSON.parse(message.toString());
-                        log(`Response received: ${response.transcription || 'N/A'}`, 'voice');
-                        if (response.success) {
-                            updateVoiceStatus(`✅ "${response.transcription}" processed by AI`, 'voice-success');
-                        } else {
-                            updateVoiceStatus(`❌ ${response.error || 'Processing failed'}`, 'voice-error');
-                        }
-                    } catch (e) {
-                        log(`Response parse error: ${e.message}`, 'error');
-                    }
-                }
-            });
-            
-        } catch (error) {
-            log(`MQTT setup error: ${error.message}`, 'error');
-        }
-    }
-    
-    // **JOYSTICK LOGIC (UNCHANGED)**
-    const joystick = document.getElementById('joystick');
-    const knob = document.getElementById('joystickKnob');
-    let dragging = false;
-    let center = { x: 0, y: 0 };
-    let maxDist = 0;
-    let lastDir = "S";
-    
-    function getDirection(dx, dy) {
-        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-        const distance = Math.sqrt(dx*dx + dy*dy);
-        
-        if (distance < maxDist * 0.3) return "S";
-        if (angle >= -45 && angle < 45) return "R";
-        if (angle >= 45 && angle < 135) return "B";
-        if (angle >= -135 && angle < -45) return "F";
-        return "L";
-    }
-    
-    function setKnob(x, y) {
-        knob.style.left = x + 'px';
-        knob.style.top = y + 'px';
-    }
-    
-    function resetKnob() {
-        setKnob(joystick.clientWidth/2, joystick.clientHeight/2);
-    }
-    
-    joystick.addEventListener('pointerdown', function(e) {
-        dragging = true;
-        const rect = joystick.getBoundingClientRect();
-        center = { x: rect.width/2, y: rect.height/2 };
-        maxDist = rect.width/2 - knob.offsetWidth/2;
-        moveKnob(e);
-        log('Joystick activated', 'info');
-    });
-    
-    window.addEventListener('pointermove', function(e) {
-        if (!dragging) return;
-        moveKnob(e);
-    });
-    
-    window.addEventListener('pointerup', function(e) {
-        if (!dragging) return;
-        dragging = false;
-        resetKnob();
-        lastDir = "S";
-        sendCarCommand("S");
-        log('Joystick released', 'info');
-    });
-    
-    function moveKnob(e) {
-        const rect = joystick.getBoundingClientRect();
-        let x = e.clientX - rect.left;
-        let y = e.clientY - rect.top;
-        let dx = x - center.x;
-        let dy = y - center.y;
-        const dist = Math.sqrt(dx*dx + dy*dy);
-        if (dist > maxDist) {
-            dx = dx * maxDist / dist;
-            dy = dy * maxDist / dist;
-        }
-        setKnob(center.x + dx, center.y + dy);
-        const dir = getDirection(dx, dy);
-        if (dir !== lastDir) {
-            lastDir = dir;
-            const currentSpeed = parseInt(speedSlider.value);
-            sendCarCommand(dir, currentSpeed);
-        }
-    }
-    
-    // **PAGE INITIALIZATION**
-    document.addEventListener('DOMContentLoaded', function() {
-        log('Secure Audio MQTT Controller initializing...', 'success');
-        
-        connectMQTT();
-        resetKnob();
-        
-        // Speed slider
-        speedSlider.addEventListener('input', function() {
-            const value = speedSlider.value;
-            speedValue.textContent = value + '%';
-            log(`Speed: ${value}%`, 'info');
-        });
-        
-        // **VOICE BUTTON HANDLERS - Audio MQTT**
-        voiceButton.addEventListener('pointerdown', function(e) {
-            e.preventDefault();
-            if (secureAudioMQTT && !voiceCommandActive) {
-                secureAudioMQTT.startRecording();
-            }
-        });
-        
-        voiceButton.addEventListener('pointerup', function(e) {
-            e.preventDefault();
-            if (secureAudioMQTT && secureAudioMQTT.isRecording) {
-                secureAudioMQTT.stopRecording();
-            }
-        });
-        
-        voiceButton.addEventListener('pointerleave', function(e) {
-            e.preventDefault();
-            if (secureAudioMQTT && secureAudioMQTT.isRecording) {
-                secureAudioMQTT.stopRecording();
-            }
-        });
-        
-        voiceButton.addEventListener('pointercancel', function(e) {
-            e.preventDefault();
-            if (secureAudioMQTT && secureAudioMQTT.isRecording) {
-                secureAudioMQTT.stopRecording();
-            }
-        });
-        
-        // **BUTTON HANDLING - CONTINUOUS SENDING**
-        document.querySelectorAll('button').forEach(function(btn) {
-            if (btn.id === 'voiceButton' || btn.id === 'themeToggle') return;
-            
-            let cmd = "";
-            let isArmButton = false;
-            
-            if (btn.id === "Up") { cmd = "U"; isArmButton = true; }
-            else if (btn.id === "Down") { cmd = "D"; isArmButton = true; }
-            else if (btn.id === "Close") { cmd = "C"; isArmButton = true; }
-            else if (btn.id === "Open") { cmd = "O"; isArmButton = true; }
-            else if (btn.classList.contains("extra1")) { cmd = "1"; isArmButton = true; }
-            else if (btn.classList.contains("extra2")) { cmd = "2"; isArmButton = true; }
-            else if (btn.classList.contains("extra3")) { cmd = "3"; isArmButton = true; }
-            else if (btn.classList.contains("extra4")) { cmd = "4"; isArmButton = true; }
-            else if (btn.classList.contains("Stop") || btn.id === "Stop1") { 
-                btn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    log('EMERGENCY STOP!', 'error');
-                    stopAllContinuousSending();
-                });
-                return;
-            }
-            
-            if (!cmd) return;
-            
-            log(`Button: ${btn.textContent || btn.id} → ${cmd} (${isArmButton ? 'ARM' : 'CAR'})`, 'info');
-            
-            btn.addEventListener('pointerdown', function(e) {
-                e.preventDefault();
-                if (!pressedButtons.has(btn.id)) {
-                    pressedButtons.add(btn.id);
-                    btn.classList.add('pressed');
-                    
-                    startContinuousSending(btn.id, cmd, isArmButton);
-                    log(`PRESS: ${btn.textContent || btn.id} → CONTINUOUS ${cmd}`, 'command');
-                }
-            });
-            
-            btn.addEventListener('pointerup', function(e) {
-                e.preventDefault();
-                if (pressedButtons.has(btn.id)) {
-                    pressedButtons.delete(btn.id);
-                    btn.classList.remove('pressed');
-                    
-                    stopContinuousSending(btn.id);
-                    
-                    if (isArmButton) {
-                        sendArmCommand("S");
-                    } else {
-                        sendCarCommand("S", parseInt(speedSlider.value));
-                    }
-                    
-                    log(`RELEASE: ${btn.textContent || btn.id} → STOP`, 'info');
-                }
-            });
-            
-            btn.addEventListener('pointercancel', function(e) {
-                e.preventDefault();
-                if (pressedButtons.has(btn.id)) {
-                    pressedButtons.delete(btn.id);
-                    btn.classList.remove('pressed');
-                    
-                    stopContinuousSending(btn.id);
-                    
-                    if (isArmButton) {
-                        sendArmCommand("S");
-                    } else {
-                        sendCarCommand("S", parseInt(speedSlider.value));
-                    }
-                    
-                    log(`CANCEL: ${btn.textContent || btn.id} → STOP`, 'info');
-                }
-            });
-            
-            btn.addEventListener('pointerleave', function(e) {
-                e.preventDefault();
-                if (pressedButtons.has(btn.id)) {
-                    pressedButtons.delete(btn.id);
-                    btn.classList.remove('pressed');
-                    
-                    stopContinuousSending(btn.id);
-                    
-                    if (isArmButton) {
-                        sendArmCommand("S");
-                    } else {
-                        sendCarCommand("S", parseInt(speedSlider.value));
-                    }
-                    
-                    log(`LEAVE: ${btn.textContent || btn.id} → STOP`, 'info');
-                }
-            });
-        });
-        
-        // Theme toggle
-        const themeToggle = document.getElementById('themeToggle');
-        themeToggle.addEventListener('click', function() {
-            document.body.classList.toggle('dark');
-            themeToggle.textContent = document.body.classList.contains('dark') ? 'O' : 'D';
-            log(`Theme: ${document.body.classList.contains('dark') ? 'Dark' : 'Light'}`, 'info');
-        });
-        
-        // Emergency cleanup on page unload
-        window.addEventListener('beforeunload', function() {
-            stopAllContinuousSending();
-            if (isRecording && mediaRecorder) {
-                mediaRecorder.stop();
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            }
-        });
-        
-        log('Secure Audio MQTT Controller ready!', 'success');
-        log(`Security Token: ${SECURITY_TOKEN}`, 'security');
-        log(`Audio Limit: ${MAX_AUDIO_SIZE_KB}KB`, 'audio');
-        log(`Device ID: ${DEVICE_ID}`, 'security');
-    });
-</script>
+  </body>
 </html>
