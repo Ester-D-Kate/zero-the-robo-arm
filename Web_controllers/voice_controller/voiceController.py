@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import os
 import random
 import re
@@ -20,7 +21,7 @@ from paho.mqtt.client import Client as MQTTClient
 from dotenv import load_dotenv
 load_dotenv()
 
-app = FastAPI(title="Alice Secure Audio MQTT Controller", version="6.1.0")
+app = FastAPI(title="Zero Secure Audio MQTT Controller", version="6.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,6 +54,10 @@ mqtt_client = None
 command_count = 0
 main_loop = None
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+CAR_COMMANDS = frozenset({"F", "B", "L", "R", "S"})
+ARM_COMMANDS = frozenset({"U", "D", "C", "O", "1", "2", "3", "4", "S"})
+publish_lock = threading.RLock()
+motion_versions = {CAR_TOPIC: 0, ARM_TOPIC: 0}
 
 def validate_security(payload: Dict) -> bool:
     """Validate security token and device"""
@@ -170,7 +175,7 @@ async def process_mqtt_audio(payload: Dict):
         # Execute commands
         execution_success = await execute_commands(commands)
         
-        print(f"✅ Audio command processed successfully from {device_id}")
+        print(f"Audio command execution result for {device_id}: {execution_success}")
         
         # Send response back via MQTT
         response_payload = {
@@ -180,6 +185,8 @@ async def process_mqtt_audio(payload: Dict):
             "success": execution_success,
             "timestamp": int(datetime.now().timestamp() * 1000)
         }
+        if not execution_success:
+            response_payload["error"] = commands.get("error", "Robot command could not be published or completed")
         
         send_response_to_device(device_id, response_payload)
         
@@ -229,47 +236,108 @@ def send_command(topic: str, command: str, speed: Optional[int] = None, position
     if not mqtt_client:
         print("❌ MQTT client not connected")
         return False
-    
-    command_count += 1
-    
-    if topic == ARM_POSITION_TOPIC and positions:
-        payload = positions.copy()
+    if (
+        (topic == CAR_TOPIC and command not in CAR_COMMANDS)
+        or (topic == ARM_TOPIC and command not in ARM_COMMANDS)
+    ):
+        print("Invalid robot command; no movement published")
+        return False
+    with publish_lock:
+        command_count += 1
+        if topic == ARM_POSITION_TOPIC and positions:
+            payload = positions.copy()
+        else:
+            payload = {"cmd": command}
+            if speed is not None and topic == CAR_TOPIC:
+                payload["speed"] = speed
         payload["timestamp"] = int(datetime.now().timestamp() * 1000)
         payload["id"] = command_count
-    else:
-        payload = {
-            "cmd": command,
-            "timestamp": int(datetime.now().timestamp() * 1000),
-            "id": command_count
-        }
-        
-        if speed is not None and topic == CAR_TOPIC:
-            payload["speed"] = speed
-    
-    try:
-        result = mqtt_client.publish(topic, json.dumps(payload))
-        if result.rc == 0:
+        try:
+            result = mqtt_client.publish(topic, json.dumps(payload))
+            if result.rc != 0:
+                print(f"❌ Failed to publish: {result.rc}")
+                return False
+            target = ARM_TOPIC if topic == ARM_POSITION_TOPIC else topic
+            if target in motion_versions:
+                motion_versions[target] += 1
             print(f"📤 Sent: {command} to {topic} {f'(speed: {speed}%)' if speed else ''}")
             return True
-        else:
-            print(f"❌ Failed to publish: {result.rc}")
+        except Exception as e:
+            print(f"❌ Failed to send command: {e}")
             return False
-    except Exception as e:
-        print(f"❌ Failed to send command: {e}")
+
+def normalize_voice_text(text: str) -> str:
+    """Remove the wake word and polite wrappers without guessing an action."""
+    if not isinstance(text, str):
+        return ""
+    text = " ".join(re.findall(r"[a-z0-9']+", text.lower().replace("’", "'")))
+    text = re.sub(r"^please\s+", "", text)
+    text = re.sub(r"^(?:(?:hey|okay|ok)\s+)?(?:zero|alice)\s+", "", text)
+    text = re.sub(r"^(?:can|could|would) you\s+", "", text)
+    return re.sub(r"^please\s+|\s+please$", "", text).strip()
+
+
+def parse_direct_command(text: str) -> Optional[Dict]:
+    """Resolve explicit controls locally, before any creative AI interpretation."""
+    normalized = normalize_voice_text(text)
+    patterns = [
+        (r"(?:(?:move|go|drive|roll) )?(?:forward|forwards|ahead)", "car_command", "F"),
+        (r"(?:(?:move|go|drive|roll) )?(?:back|backward|backwards|reverse)", "car_command", "B"),
+        (r"(?:(?:turn|move|go|steer) )?left", "car_command", "L"),
+        (r"(?:(?:turn|move|go|steer) )?right", "car_command", "R"),
+        (r"(?:raise|lift)(?: the)? arm|(?:move )?(?:the )?arm up", "arm_command", "U"),
+        (r"lower(?: the)? arm|(?:move )?(?:the )?arm down", "arm_command", "D"),
+        (r"open(?: the)? (?:claw|gripper)", "arm_command", "O"),
+        (r"close(?: the)? (?:claw|gripper)", "arm_command", "C"),
+        (r"(?:turn |move )?(?:the )?neck left", "arm_command", "1"),
+        (r"(?:move )?(?:the )?neck up", "arm_command", "2"),
+        (r"(?:move )?(?:the )?neck down", "arm_command", "3"),
+        (r"(?:turn |move )?(?:the )?neck right", "arm_command", "4"),
+    ]
+    if normalized in {"stop", "stop moving", "stop everything", "stop all", "emergency stop", "halt"}:
+        return {
+            "command_type": "simple",
+            "car_command": "S",
+            "arm_command": "S",
+            "interpretation": "Stop all movement",
+        }
+    for pattern, field, command in patterns:
+        if re.fullmatch(pattern, normalized):
+            return {
+                "command_type": "simple",
+                field: command,
+                "interpretation": f"Execute {normalized}",
+            }
+    return None
+
+
+def is_performance_request(text: str) -> bool:
+    normalized = normalize_voice_text(text)
+    if re.search(r"\b(?:don't|dont|not|never|no)\b", normalized):
         return False
+    return bool(re.fullmatch(
+        r"(?:(?:do|perform|show)(?: me)? )?(?:(?:a|an|energetic|gentle|playful|dramatic|elegant|creative|cultural|folk|classical) )*"
+        r"(?:dance|gesture|wave|nod|ringa ringa)(?: for me| for [0-9]+ seconds)?",
+        normalized,
+    ))
+
 
 def ai_command_interpreter(text: str) -> Dict:
-    """AI-powered command interpreter using the powerful 70B model"""
+    """Handle explicit controls directly; reserve AI for requested performances."""
+    direct = parse_direct_command(text)
+    if direct:
+        return direct
+    if not is_performance_request(text):
+        return create_intelligent_fallback(text)
     
-    system_prompt = """You are Alice, an advanced robotic assistant with creative movement capabilities. 
+    system_prompt = """You are Zero, a robotic assistant. Interpret only the user's explicit performance request.
 
 RESPONSE MODES:
-1. "ai_sequence" - AI generates ALL sequences (DEFAULT)
+1. "ai_sequence" - A specifically requested dance or gesture
 2. "simple" - Single movement commands
-3. "multi_step" - Complex multi-step sequences
-4. "position" - Precise joint positioning
+3. "noop" - The request is unclear, unsupported, or must not move the robot
 
-USE "ai_sequence" for EVERYTHING unless it's clearly a simple single command.
+Basic movement commands are handled locally. Do not invent movement, a dance, or an acknowledgment gesture for unclear speech.
 
 AVAILABLE COMMANDS:
 Car: F(forward), B(backward), L(left), R(right), S(stop)
@@ -277,7 +345,7 @@ Arm: U(up), D(down), C(close claw), O(open claw), 1(neck left), 2(neck up), 3(ne
 
 RESPONSE FORMAT (JSON ONLY):
 {
-    "command_type": "ai_sequence|simple|multi_step|position",
+    "command_type": "ai_sequence|simple|noop",
     "intent": "clear description of what user wants",
     "style": "energetic|gentle|playful|dramatic|elegant|creative|cultural|normal",
     "duration_preference": "short|medium|long|custom",
@@ -288,17 +356,17 @@ RESPONSE FORMAT (JSON ONLY):
     "custom_speed": 80,
     "car_command": "F" OR null,
     "arm_command": "U" OR null,
-    "interpretation": "what Alice will do"
+    "interpretation": "what Zero will do"
 }
 
 EXAMPLES:
 "dance for me" → ai_sequence, intent: "perform a creative dance", style: "playful", creativity_level: "high"
 "Ringa Ringa" → ai_sequence, intent: "perform Ringa Ringa dance", cultural_context: "Indian folk dance", style: "cultural"
-"Thank you" → ai_sequence, intent: "grateful acknowledgment gesture", style: "gentle", creativity_level: "medium"
+"Thank you" → noop
 "move forward" → simple, car_command: "F"
 "energetic dance for 20 seconds" → ai_sequence, custom_duration: 20, style: "energetic", creativity_level: "high"
 
-ALWAYS use "ai_sequence" unless it's clearly a single movement command."""
+Use "noop" when the requested action cannot be determined."""
 
     try:
         # Use the CORRECT powerful 70B model name
@@ -306,7 +374,7 @@ ALWAYS use "ai_sequence" unless it's clearly a single movement command."""
             model="llama-3.3-70b-versatile",  # ✅ CORRECT current 70B model
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Interpret this command for Alice robot: {text}"}
+                {"role": "user", "content": f"Interpret this request for Zero: {text}"}
             ],
             temperature=0.3,
             max_tokens=400
@@ -330,7 +398,7 @@ ALWAYS use "ai_sequence" unless it's clearly a single movement command."""
         
         # Set defaults
         defaults = {
-            "command_type": "ai_sequence",
+            "command_type": "noop",
             "intent": text,
             "style": "normal",
             "duration_preference": "medium",
@@ -355,49 +423,13 @@ ALWAYS use "ai_sequence" unless it's clearly a single movement command."""
         return create_intelligent_fallback(text)
 
 def create_intelligent_fallback(text: str) -> Dict:
-    """Create intelligent fallback based on text analysis"""
-    text_lower = text.lower()
-    
-    # Detect cultural dances
-    if any(word in text_lower for word in ['ringa', 'inga', 'rose', 'classical', 'folk']):
-        return {
-            "command_type": "ai_sequence",
-            "intent": f"cultural dance performance: {text}",
-            "style": "cultural",
-            "cultural_context": "Indian folk dance",
-            "creativity_level": "high",
-            "interpretation": f"Cultural dance interpretation of: {text}"
-        }
-    
-    # Detect gratitude/politeness
-    elif any(word in text_lower for word in ['thank', 'thanks', 'please', 'sorry']):
-        return {
-            "command_type": "ai_sequence",
-            "intent": f"polite gesture: {text}",
-            "style": "gentle",
-            "creativity_level": "medium",
-            "interpretation": f"Polite gesture for: {text}"
-        }
-    
-    # Detect dance requests
-    elif any(word in text_lower for word in ['dance', 'move', 'perform']):
-        return {
-            "command_type": "ai_sequence",
-            "intent": f"dance performance: {text}",
-            "style": "energetic",
-            "creativity_level": "high",
-            "interpretation": f"Dance interpretation of: {text}"
-        }
-    
-    # Default creative interpretation
-    else:
-        return {
-            "command_type": "ai_sequence",
-            "intent": f"creative movement: {text}",
-            "style": "playful",
-            "creativity_level": "high",
-            "interpretation": f"Creative interpretation of: {text}"
-        }
+    """A failed interpretation must never invent robot movement."""
+    return parse_direct_command(text) or {
+        "command_type": "noop",
+        "intent": text,
+        "interpretation": "No movement: command was not understood",
+        "error": "Command not understood. Try 'Zero, move forward', 'move backward', or 'stop'.",
+    }
 
 def ai_sequence_generator(commands: Dict) -> List[Dict]:
     """Advanced AI sequence generator with the powerful 70B model"""
@@ -516,8 +548,8 @@ Generate {num_steps} creative, expressive steps for: {intent} ({style} style, {c
         return enhanced_sequence
         
     except Exception as e:
-        print(f"❌ 70B AI sequence generation failed, using enhanced fallback: {e}")
-        return generate_enhanced_fallback(intent, style, base_speed, num_steps, total_duration)
+        print(f"AI sequence generation failed; no movement generated: {e}")
+        return []
 
 def generate_enhanced_fallback(intent: str, style: str, speed: int, num_steps: int, duration: float) -> List[Dict]:
     """Enhanced fallback with style-aware patterns"""
@@ -588,40 +620,72 @@ def generate_enhanced_fallback(intent: str, style: str, speed: int, num_steps: i
 
 async def execute_sequence(sequence: List[Dict]) -> bool:
     """Execute any sequence of movements with detailed logging"""
-    print(f"🎭 Executing {len(sequence)} step AI sequence")
-    
-    for i, step in enumerate(sequence):
-        description = step.get('description', f"Step {i+1}")
-        print(f"🎪 {description}")
-        print(f"   └─ Car: {step.get('car_command', 'None')}, Arm: {step.get('arm_command', 'None')}, Speed: {step.get('speed', 0)}%, Duration: {step.get('duration', 0)}s")
-        
-        # Send car command
-        if step.get("car_command") and step["car_command"] != "S":
-            send_command(CAR_TOPIC, step["car_command"], step.get("speed", 50))
-        
-        # Send arm command
-        if step.get("arm_command") and step["arm_command"] != "S":
-            send_command(ARM_TOPIC, step["arm_command"])
-        
-        # Wait for step duration
-        if step.get("duration", 0) > 0:
-            await asyncio.sleep(step["duration"])
-        
-        # Send stop commands if this is a stop step
-        if step.get("car_command") == "S":
-            send_command(CAR_TOPIC, "S")
-        if step.get("arm_command") == "S":
-            send_command(ARM_TOPIC, "S")
-    
-    print(f"✅ 70B AI sequence completed successfully!")
-    return True
+    if not isinstance(sequence, list) or not sequence:
+        return False
+    for step in sequence:
+        if not isinstance(step, dict):
+            return False
+        car, arm = step.get("car_command"), step.get("arm_command")
+        duration, speed = step.get("duration", 0), step.get("speed", 50)
+        if (
+            (not car and not arm)
+            or (car is not None and car not in CAR_COMMANDS)
+            or (arm is not None and arm not in ARM_COMMANDS)
+            or isinstance(duration, bool)
+            or not isinstance(duration, (int, float))
+            or not math.isfinite(duration)
+            or not 0 <= duration <= 8
+            or isinstance(speed, bool)
+            or not isinstance(speed, (int, float))
+            or not math.isfinite(speed)
+            or not 0 <= speed <= 100
+        ):
+            return False
+    print(f"Executing {len(sequence)} voice sequence steps")
+    topics = {
+        topic for step in sequence
+        for topic, field in [(CAR_TOPIC, "car_command"), (ARM_TOPIC, "arm_command")]
+        if step.get(field)
+    }
+    with publish_lock:
+        versions = {topic: motion_versions[topic] for topic in topics}
+    active = set()
+    stopped = True
+    try:
+        for step in sequence:
+            with publish_lock:
+                if any(motion_versions[topic] != version for topic, version in versions.items()):
+                    return False
+                for topic, field in [(CAR_TOPIC, "car_command"), (ARM_TOPIC, "arm_command")]:
+                    command = step.get(field)
+                    if not command:
+                        continue
+                    speed = 0 if command == "S" else step.get("speed", 50)
+                    if not send_command(topic, command, speed):
+                        return False
+                    versions[topic] = motion_versions[topic]
+                    if command == "S":
+                        active.discard(topic)
+                    else:
+                        active.add(topic)
+            if step.get("duration", 0) > 0:
+                await asyncio.sleep(step["duration"])
+        with publish_lock:
+            if any(motion_versions[topic] != version for topic, version in versions.items()):
+                return False
+    finally:
+        with publish_lock:
+            for topic in active:
+                if motion_versions[topic] == versions[topic]:
+                    stopped &= send_command(topic, "S", 0)
+    return stopped
 
 async def execute_commands(commands: Dict) -> bool:
     """Execute commands with full AI integration"""
     success = True
     
     try:
-        command_type = commands.get("command_type", "ai_sequence")
+        command_type = commands.get("command_type", "noop")
         
         if command_type == "ai_sequence":
             print(f"🤖✨ Generating 70B AI sequence for: {commands.get('intent', 'unknown')}")
@@ -631,22 +695,31 @@ async def execute_commands(commands: Dict) -> bool:
             success = await execute_sequence(ai_sequence)
             
         elif command_type == "simple":
-            # Execute simple commands
-            if commands.get("car_command"):
-                print(f"🚗 Simple car command: {commands['car_command']}")
-                success &= send_command(CAR_TOPIC, commands["car_command"], 50)
-            
-            if commands.get("arm_command"):
-                print(f"🦾 Simple arm command: {commands['arm_command']}")
-                success &= send_command(ARM_TOPIC, commands["arm_command"])
-            
-            # Auto-stop after 2 seconds for simple commands
-            asyncio.create_task(send_stop_after_delay(2.0))
+            car = commands.get("car_command")
+            arm = commands.get("arm_command")
+            if (
+                (not car and not arm)
+                or (car is not None and car not in CAR_COMMANDS)
+                or (arm is not None and arm not in ARM_COMMANDS)
+            ):
+                return False
+            targets = {}
+            with publish_lock:
+                for topic, command in [(CAR_TOPIC, car), (ARM_TOPIC, arm)]:
+                    if not command:
+                        continue
+                    published = send_command(topic, command, 50 if command != "S" else 0)
+                    success &= published
+                    if published and command != "S":
+                        targets[topic] = motion_versions[topic]
+            # Wait for the bounded movement and stop only its target.
+            if targets:
+                stopped = await send_stop_after_delay(2.0, targets)
+                success = success and stopped
             
         else:
-            print(f"🤖 Unknown command type, using 70B AI sequence")
-            ai_sequence = ai_sequence_generator(commands)
-            success = await execute_sequence(ai_sequence)
+            print("No executable voice command; no movement published")
+            success = False
     
     except Exception as e:
         print(f"❌ Command execution failed: {e}")
@@ -654,12 +727,18 @@ async def execute_commands(commands: Dict) -> bool:
     
     return success
 
-async def send_stop_after_delay(delay_seconds: float):
+async def send_stop_after_delay(delay_seconds: float, targets: Dict[str, int]):
     """Send stop commands after specified delay"""
-    await asyncio.sleep(delay_seconds)
-    send_command(CAR_TOPIC, "S")
-    send_command(ARM_TOPIC, "S")
+    success = True
+    try:
+        await asyncio.sleep(delay_seconds)
+    finally:
+        with publish_lock:
+            for topic, version in targets.items():
+                if motion_versions[topic] == version:
+                    success &= send_command(topic, "S", 0)
     print(f"⏹️ Auto-stop after {delay_seconds}s")
+    return success
 
 @app.on_event("startup")
 async def startup_event():
@@ -667,6 +746,7 @@ async def startup_event():
     global main_loop
     
     print("🚀 Starting Alice Secure Audio MQTT Controller...")
+    print("Voice routing 6.2: direct movement commands; unclear speech sends no movement")
     
     # **FIXED: Store reference to main event loop**
     main_loop = asyncio.get_event_loop()
@@ -716,7 +796,7 @@ async def process_voice_command(audio_file: UploadFile = File(...)):
         
         # Enhanced response format
         response = {
-            "success": True,
+            "success": execution_success,
             "transcription": text,
             "commands": commands,
             "ai_interpretation": commands,
@@ -744,7 +824,7 @@ async def process_text_command(text: str):
         execution_success = await execute_commands(commands)
         
         response = {
-            "success": True,
+            "success": execution_success,
             "commands": commands,
             "ai_interpretation": commands,
             "executed": execution_success,
@@ -772,7 +852,8 @@ async def get_capabilities():
         "security_enabled": True,
         "event_loop_fixed": True,
         "capabilities": [
-            "70B AI-generated sequences for ANY request",
+            "Direct forward, backward, turn, arm and stop commands",
+            "AI sequences for explicitly requested performances",
             "Secure Audio MQTT processing",
             "Advanced cultural dance interpretation", 
             "Creative movement generation",
@@ -786,7 +867,9 @@ async def get_capabilities():
         "creativity_levels": ["low", "medium", "high", "maximum"],
         "cultural_support": ["Indian classical", "Folk dances", "Ringa Ringa", "Custom"],
         "example_commands": [
-            "Thank you", 
+            "Zero, move forward",
+            "Zero, move backward",
+            "Zero, stop",
             "Inga Inga Roses performance",
             "energetic celebration dance",
             "gentle thank you gesture",
@@ -842,7 +925,7 @@ async def health_check():
         "max_audio_size_mb": MAX_AUDIO_SIZE_MB,
         "event_loop_fixed": True,
         "main_loop_available": main_loop is not None,
-        "version": "6.1.0 - EVENT LOOP FIXED",
+        "version": "6.2.0 - DIRECT VOICE ROUTING",
         "timestamp": datetime.now().isoformat()
     }
 

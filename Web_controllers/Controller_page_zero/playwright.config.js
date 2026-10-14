@@ -9,6 +9,7 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:4173",
     browserName: "chromium",
     launchOptions: {
+      args: ["--host-resolver-rules=MAP camera-fixture.local 127.0.0.1"],
       executablePath:
         process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ??
         (existsSync(localChrome) ? localChrome : undefined),

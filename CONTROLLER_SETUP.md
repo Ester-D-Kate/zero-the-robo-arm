@@ -1,6 +1,6 @@
 # Zero webpage controller
 
-The firmware and existing Python/Groq voice/security server are unchanged. Build and deploy the static webpage only. No robot status message is required.
+The firmware is unchanged. The static webpage uses the existing Python/Groq voice/security server and original MQTT topics. Its voice routing fix is documented in [the voice server setup](Web_controllers/voice_controller/README.md). No robot status message is required.
 
 ## Run locally
 
@@ -71,19 +71,23 @@ The page displays **MQTT connected** for broker connectivity. Admin queue availa
 | `alice/zero/voice/audio` | Recorded base64 audio, existing security token and `WebControl_` device ID, format/duration/sample-rate/channel/size/timestamp/message fields. |
 | `alice/zero/voice/response/<device_id>` | Existing server's success/error/transcription reply. |
 
-Voice records with MediaRecorder, then sends audio to the existing MQTT voice/security server. It does not use browser speech recognition or introduce a new voice service. The server must already be running and connected to the same broker. Recordings are limited to 15 seconds and 500 KB. Permission denied, lost access, or canceled recording discards the audio. The arm flag controls the webpage layout; the unchanged AI voice server can still interpret arm commands.
+Voice records with MediaRecorder, then sends audio to the existing MQTT voice/security server. It does not use browser speech recognition or introduce a new voice service. The server must already be running and connected to the same broker. Recordings are limited to 15 seconds and 500 KB. Permission denied, lost access, or canceled recording discards the audio. The arm flag controls the webpage layout; the voice server can still interpret explicitly requested arm commands. Deploy the updated Python script separately to the machine running the voice server; a Netlify deployment does not update that process.
 
 ## ESP32-CAM MJPEG POV
 
-The sibling `esp-cam` project serves native MJPEG at `http://<camera-ip>:81/stream`, with `multipart/x-mixed-replace;boundary=frame` JPEG parts. Paste a camera address or complete stream URL. A base HTTP address is normalized to port 81 `/stream`.
+The sibling `esp-cam` project serves native MJPEG at `http://<camera-ip>:81/stream`, with `multipart/x-mixed-replace;boundary=frame` JPEG parts. Paste a camera address or complete stream URL. A base HTTP address or `/stream` URL without a port is normalized to port 81. For example, `http://esp32.local/stream` becomes `http://esp32.local:81/stream`. Explicit nonstandard ports are preserved.
 
-Only the current controller opens the camera. The image fills the viewport with the full field of view preserved and translucent controls on top. Losing access or disconnecting releases the image connection; this matters because the camera allows one preview client. Native image loading does not require CORS headers. HTTPS webpages cannot display a plain HTTP stream in browsers that block mixed content; the page explains this restriction. The browser must have network access to the camera address.
+Only the current controller opens the camera. The image fills the viewport with the full field of view preserved and translucent controls on top. Losing access or disconnecting releases the image connection; this matters because the camera allows one preview client. Native image loading does not require CORS headers.
 
-## Limits with unchanged firmware and voice server
+The Netlify HTTPS controller accepts the camera's HTTP private IP or `.local` address. In a current Chrome or Edge browser, connect the camera and allow the browser's **Local network access** permission for this site. This browser permission allows local HTTP subresources without forcing the ESP-CAM to implement HTTPS. Use the same Wi-Fi/network as the camera; Netlify cannot reach a private camera on the user's behalf. A `.local` address must resolve on the user's device, otherwise use the private IP. No camera firmware update or new relay service is required.
+
+Browsers that do not support this local-network mixed-content exemption can still block HTTP cameras from an HTTPS controller; webpage JavaScript cannot override that restriction. Use a supporting browser or the existing localhost HTTP preview. Public HTTP hostnames are not accepted from the HTTPS controller: use the camera's LAN IP or `.local` hostname. The connection waits up to one minute while a local-network permission prompt is pending, and disconnect or loss of robot access still cancels it immediately. See the [Chrome local-network access documentation](https://developer.chrome.com/blog/local-network-access).
+
+## Limits with unchanged firmware
 
 The queue governs cooperating webpage clients. The unchanged firmware still accepts its original command topics, and the existing voice server executes commands itself. A separate MQTT client can bypass the webpage queue. Password-protected, signed admin queue state prevents normal guest pages from forging admin grants, but it does not turn the existing public broker/firmware into an enforced robot access boundary.
 
-The page blocks new voice recordings/submissions after takeover and sends stop commands on reachable ownership loss. It cannot recall audio already submitted to the unchanged server or cancel that server's AI sequences and delayed stops. Total MQTT/network loss cannot guarantee that the unchanged robot stops. Enforcing these boundaries against other publishers or in-flight server jobs would require broker ACLs, server changes, or firmware changes, which are outside this requested webpage-only update.
+The page blocks new voice recordings/submissions after takeover and sends stop commands on reachable ownership loss. It cannot recall audio already submitted to the voice server or cancel its in-flight jobs. The voice server cancels superseded motions from other commands it handles, but does not enforce the webpage queue or observe commands from other MQTT publishers. Total MQTT/network loss cannot guarantee that the unchanged robot stops. Enforcing these boundaries against other publishers would require broker ACLs or firmware changes.
 
 ## Verification
 

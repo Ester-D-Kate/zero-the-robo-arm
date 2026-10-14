@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import path from "node:path";
 import { readConfig } from "../scripts/build-config.js";
 import { createTestBroker } from "./mqtt-broker.js";
+import { createCameraFixture } from "./mjpeg-camera.js";
 let broker, config;
 const password = "correct horse battery staple";
 test.beforeEach(() => {
@@ -17,7 +18,7 @@ test.beforeEach(() => {
 test.afterEach(() => broker.close());
 async function open(
   page,
-  { admin = false, arm = false, mode = "automatic" } = {},
+  { admin = false, arm = false, mode = "automatic", origin = "" } = {},
 ) {
   await page.route("**/config.js", (route) =>
     route.fulfill({
@@ -27,7 +28,7 @@ async function open(
         JSON.stringify({ ...config, hasRoboticArm: arm, queueMode: mode }),
     }),
   );
-  await page.goto(admin ? "/admin/" : "/");
+  await page.goto(origin + (admin ? "/admin/" : "/"));
   await expect(page.locator("#connectionStatus")).toHaveText("MQTT connected");
 }
 async function admin(page, options = {}) {
@@ -367,55 +368,7 @@ test("mobile MJPEG POV overlays controls and releases the camera socket on admin
   await admin(board);
   await open(page);
   await join(page, "POVDriver");
-  const jpeg = Buffer.from(
-    await page.evaluate(() => {
-      const canvas = document.createElement("canvas");
-      canvas.width = 600;
-      canvas.height = 800;
-      const ctx = canvas.getContext("2d");
-      ctx.fillStyle = "#253c36";
-      ctx.fillRect(0, 0, 600, 800);
-      return canvas.toDataURL("image/jpeg").split(",")[1];
-    }),
-    "base64",
-  );
-  let released = false;
-  const camera = Bun.serve({
-    hostname: "127.0.0.1",
-    port: 0,
-    fetch() {
-      let timer;
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            const frame = () => {
-              controller.enqueue(
-                new TextEncoder().encode(
-                  "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " +
-                    jpeg.length +
-                    "\r\n\r\n",
-                ),
-              );
-              controller.enqueue(jpeg);
-              controller.enqueue(new TextEncoder().encode("\r\n"));
-            };
-            frame();
-            timer = setInterval(frame, 100);
-          },
-          cancel() {
-            clearInterval(timer);
-            released = true;
-          },
-        }),
-        {
-          headers: {
-            "Content-Type": "multipart/x-mixed-replace;boundary=frame",
-            "Cache-Control": "no-store",
-          },
-        },
-      );
-    },
-  });
+  const { server: camera, released } = await createCameraFixture(page);
   try {
     await page
       .locator("#cameraSettings")
@@ -442,7 +395,91 @@ test("mobile MJPEG POV overlays controls and releases the camera socket on admin
     });
     await board.locator("#masterButton").click();
     await expect(page.locator("body")).not.toHaveClass(/pov/);
-    await expect.poll(() => released).toBe(true);
+    await expect.poll(released).toBe(true);
+  } finally {
+    camera.stop(true);
+  }
+});
+
+test("HTTPS controller loads native .local HTTP MJPEG after local-network permission", async ({
+  page,
+  context,
+}) => {
+  const origin = "https://controller.example.test";
+  await context.grantPermissions(["local-network-access"], { origin });
+  await page.route(origin + "/**", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    const file = pathname === "/" ? "index.html" : pathname.slice(1);
+    if (
+      !["index.html", "controller.js", "style.css", "config.js"].includes(file)
+    )
+      return route.abort();
+    const contentType = file.endsWith(".js")
+      ? "application/javascript"
+      : file.endsWith(".css")
+        ? "text/css"
+        : "text/html";
+    await route.fulfill({
+      contentType,
+      body: Buffer.from(
+        await Bun.file(path.resolve("dist", file)).arrayBuffer(),
+      ),
+    });
+  });
+  const board = await context.newPage();
+  await admin(board);
+  await open(page, { origin });
+  expect(await page.evaluate(() => location.protocol)).toBe("https:");
+  expect(await page.evaluate(() => window.isSecureContext)).toBe(true);
+  await join(page, "HTTPSCameraDriver");
+  const { server: camera, released } = await createCameraFixture(page);
+  try {
+    await page
+      .locator("#cameraSettings")
+      .evaluate((element) => (element.open = true));
+    await page
+      .getByLabel("Camera stream URL")
+      .fill("http://camera-fixture.local:" + camera.port + "/stream");
+    await page
+      .getByRole("button", { name: "Connect camera", exact: true })
+      .click();
+    await expect(page.locator("body")).toHaveClass(/pov/);
+    await expect(page.locator("#cameraStatus")).toHaveText("Camera connected");
+    expect(
+      await page.locator("#cameraFeed").evaluate((image) => image.naturalWidth),
+    ).toBe(600);
+    await expect(page.locator("#joystick")).toBeVisible();
+    await page
+      .getByRole("button", { name: "Disconnect camera", exact: true })
+      .click();
+    await expect.poll(released).toBe(true);
+    const permissionSession = await context.newCDPSession(page);
+    const { targetInfo } = await permissionSession.send("Target.getTargetInfo");
+    for (const name of [
+      "local-network-access",
+      "local-network",
+      "loopback-network",
+    ])
+      await permissionSession.send("Browser.setPermission", {
+        permission: { name },
+        setting: "denied",
+        origin,
+        browserContextId: targetInfo.browserContextId,
+      });
+    await page
+      .locator("#cameraSettings")
+      .evaluate((element) => (element.open = true));
+    await page
+      .getByRole("button", { name: "Connect camera", exact: true })
+      .click();
+    await expect(page.locator("#cameraStatus")).toContainText(
+      "Camera unavailable",
+    );
+    await expect(page.locator("#cameraStatus")).toContainText(
+      "local-network access",
+    );
+    await expect(page.locator("body")).not.toHaveClass(/pov/);
+    await permissionSession.detach();
   } finally {
     camera.stop(true);
   }
